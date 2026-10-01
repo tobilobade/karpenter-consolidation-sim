@@ -10,6 +10,8 @@ See how Karpenter v1 consolidation settings behave over time. Pick a scenario, t
 - **NodePool:** `consolidationPolicy`, `consolidateAfter`, disruption budgets (percent/count, reasons, daily schedule windows), instance families and sizes.
 - **kube-scheduler scoring:** LeastAllocated (default) vs MostAllocated.
 
+New to the terms? Click **Glossary** (or any **?** next to a setting) for plain-language explanations.
+
 ## Presets
 
 | Scenario | Lesson |
@@ -36,6 +38,7 @@ It's for building intuition, not predicting exact numbers. Validate important sc
 
 - `engine.js`: simulation (no DOM)
 - `presets.js`: scenarios
+- `glossary.js`: plain-language term explanations
 - `charts.js`: SVG line charts + node timeline
 - `app.js`: UI and state
 - `index.html`, `styles.css`

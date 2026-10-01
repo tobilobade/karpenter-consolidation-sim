@@ -136,3 +136,32 @@ pre.yaml { background: var(--page); border: 1px solid var(--border); border-radi
 .log div.empty { cursor: default; display: block; color: var(--muted); }
 ul.assumptions { padding-left: 20px; margin: 8px 0 0; color: var(--text-2); }
 ul.assumptions li { margin-bottom: 4px; }
+
+.help {
+  display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0;
+  border-radius: 50%; font-size: 10px; font-weight: 700; line-height: 1; vertical-align: 1px;
+  color: var(--text-2); background: var(--surface-2); border: 1px solid var(--border);
+}
+.help:hover { background: var(--text); color: var(--surface); }
+.hint { color: var(--muted); font-size: 12px; }
+.field > span:first-child { display: inline-flex; gap: 4px; align-items: center; }
+
+#glossary {
+  position: fixed; top: 0; right: 0; bottom: 0; width: 360px; max-width: 92vw; z-index: 20;
+  background: var(--surface); border-left: 1px solid var(--border); box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
+  padding: 16px 18px 40px; overflow-y: auto; transform: translateX(100%); transition: transform 0.25s ease; visibility: hidden;
+}
+body.glossary-open #glossary { transform: none; visibility: visible; }
+@media (min-width: 1100px) { body.glossary-open main { margin-right: 360px; } }
+.g-head { display: flex; justify-content: space-between; align-items: center; }
+.g-head h2 { margin: 0; }
+#glossary-search { width: 100%; margin: 10px 0 4px; }
+#glossary h3 { margin: 18px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+#glossary dl { margin: 0 0 6px; padding: 8px 10px; border-radius: 8px; scroll-margin-top: 12px; }
+#glossary dt { font-weight: 600; }
+#glossary dd { margin: 2px 0 0; color: var(--text-2); }
+#glossary dd.example { margin-top: 6px; padding-left: 8px; border-left: 2px solid var(--axis); }
+#glossary dl.flash { animation: flash 1.6s ease; }
+@keyframes flash { from { background: var(--grid); } to { background: transparent; } }
+.wl-table th { white-space: nowrap; }
+.g-sticky { position: sticky; top: -16px; background: var(--surface); padding-top: 16px; margin-top: -16px; z-index: 1; }

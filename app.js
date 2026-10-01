@@ -19,6 +19,11 @@
     ['blocked', 'Blocked'], ['budget', 'Budget'], ['abandon', 'Abandoned'],
   ];
   const MAX_LOG_LINES = 1500;
+  const POLICY_HINTS = {
+    WhenEmpty: 'Only removes servers with no pods left. Never moves your pods.',
+    WhenEmptyOrUnderutilized: 'Also moves pods to free up half-empty servers. Saves more, but restarts pods.',
+  };
+  const help = (id, label) => `<button type="button" class="help" data-term="${id}" aria-label="Explain ${label || id}">?</button>`;
 
   let state;
   let results = null;
@@ -104,7 +109,7 @@
         <td><button type="button" class="link" data-action="remove-workload" data-i="${i}" aria-label="Remove workload">remove</button></td>
       </tr>`;
     }).join('');
-    $('#workloads').innerHTML = `<tr><th>Name</th><th>CPU (m)</th><th>Mem (Mi)</th><th>Replicas over time</th><th>PDB</th><th>do-not-disrupt</th><th>Runs in</th><th></th></tr>${rows}`;
+    $('#workloads').innerHTML = `<tr><th>Name ${help('pod', 'pod')}</th><th>CPU (m) ${help('requests', 'CPU and memory')}</th><th>Mem (Mi)</th><th>Replicas over time ${help('shapes', 'replicas over time')}</th><th>PDB ${help('pdb', 'PDB')}</th><th>do-not-disrupt ${help('doNotDisrupt', 'do-not-disrupt')}</th><th>Runs in ${help('runsIn', 'runs in')}</th><th></th></tr>${rows}`;
   }
 
   function renderConfig(side) {
@@ -115,9 +120,9 @@
       const p = `${side}.budgets.${j}`;
       return `<div class="budget">
         <label class="shape-params">nodes <input type="text" data-path="${p}.nodes" data-validate="budget" value="${esc(b.nodes)}" style="width:60px"></label>
-        <span class="shape-params">reasons</span>
+        <span class="shape-params">reasons ${help('reasons', 'budget reasons')}</span>
         <span class="checks">${check(p + '.reasons', 'Empty', b.reasons)}${check(p + '.reasons', 'Underutilized', b.reasons)}</span>
-        <label class="shape-params"><input type="checkbox" data-action="budget-sched" data-side="${side}" data-j="${j}"${b.schedule ? ' checked' : ''}>scheduled</label>
+        <label class="shape-params"><input type="checkbox" data-action="budget-sched" data-side="${side}" data-j="${j}"${b.schedule ? ' checked' : ''}>scheduled</label>${help('schedule', 'scheduled budgets')}
         ${b.schedule ? `<span class="shape-params">from ${num(p + '.schedule.startHour')}:00 for ${num(p + '.schedule.durationHours')}h</span>` : ''}
         <button type="button" class="link" data-action="remove-budget" data-side="${side}" data-j="${j}">remove</button>
       </div>`;
@@ -126,21 +131,25 @@
     $('#config-' + side).innerHTML = `
       <h2><span class="key ${side}"></span>Config ${side.toUpperCase()}</h2>
       <div class="fields">
-        <label class="field">consolidationPolicy
-          <select data-path="${side}.consolidationPolicy">${opt('WhenEmptyOrUnderutilized', c.consolidationPolicy)}${opt('WhenEmpty', c.consolidationPolicy)}</select>
-        </label>
-        <label class="field">consolidateAfter <span class="muted">e.g. 0s, 30s, 5m, Never</span>
-          <input type="text" data-path="${side}.consolidateAfter" data-validate="duration" value="${esc(c.consolidateAfter)}">
-        </label>
-        <label class="field">kube-scheduler scoring
-          <select data-path="${side}.schedulerScoring">${opt('LeastAllocated', c.schedulerScoring, 'LeastAllocated (default)')}${opt('MostAllocated', c.schedulerScoring)}</select>
-        </label>
+        <div class="field">
+          <span>consolidationPolicy ${help(c.consolidationPolicy === 'WhenEmpty' ? 'whenEmpty' : 'whenUnderutilized', 'consolidation policy')}</span>
+          <select data-path="${side}.consolidationPolicy" aria-label="consolidationPolicy">${opt('WhenEmptyOrUnderutilized', c.consolidationPolicy)}${opt('WhenEmpty', c.consolidationPolicy)}</select>
+          <span class="hint" id="policy-hint-${side}">${POLICY_HINTS[c.consolidationPolicy]}</span>
+        </div>
+        <div class="field">
+          <span>consolidateAfter ${help('consolidateAfter', 'consolidateAfter')} <span class="muted">e.g. 0s, 30s, 5m, Never</span></span>
+          <input type="text" data-path="${side}.consolidateAfter" data-validate="duration" value="${esc(c.consolidateAfter)}" aria-label="consolidateAfter">
+        </div>
+        <div class="field">
+          <span>kube-scheduler scoring ${help('scoring', 'scheduler scoring')}</span>
+          <select data-path="${side}.schedulerScoring" aria-label="kube-scheduler scoring">${opt('LeastAllocated', c.schedulerScoring, 'LeastAllocated (default)')}${opt('MostAllocated', c.schedulerScoring)}</select>
+        </div>
       </div>
       <div class="fields">
-        <div class="field">instance-family<span class="checks">${FAMILIES.map((f) => check(side + '.families', f, c.families)).join('')}</span></div>
-        <div class="field">instance-size<span class="checks">${KSim.SIZES.map((s) => check(side + '.sizes', s, c.sizes)).join('')}</span></div>
+        <div class="field"><span>instance-family ${help('instanceReqs', 'instance family')}</span><span class="checks">${FAMILIES.map((f) => check(side + '.families', f, c.families)).join('')}</span></div>
+        <div class="field"><span>instance-size ${help('instanceReqs', 'instance size')}</span><span class="checks">${KSim.SIZES.map((s) => check(side + '.sizes', s, c.sizes)).join('')}</span></div>
       </div>
-      <h3>Disruption budgets <span class="muted" style="font-weight:400">(no reasons checked = all reasons)</span></h3>
+      <h3>Disruption budgets ${help('budgets', 'disruption budgets')} <span class="muted" style="font-weight:400">(no reasons checked = all reasons)</span></h3>
       ${budgets || '<p class="muted">No budgets, so disruption is unlimited.</p>'}
       <button type="button" data-action="add-budget" data-side="${side}" style="margin-top:6px">+ Add budget</button>
       <details style="margin-top:12px"><summary>NodePool YAML</summary><pre class="yaml" id="yaml-${side}"></pre></details>`;
@@ -243,8 +252,9 @@ spec:
         value = el.value.trim();
     }
     setPath(state, path, value);
-    if (path.startsWith('a.')) renderYaml('a');
-    if (path.startsWith('b.')) renderYaml('b');
+    const side = path[0];
+    if (path === side + '.consolidationPolicy') renderConfig(side);
+    else if (path.startsWith('a.') || path.startsWith('b.')) renderYaml(side);
     scheduleRun();
   }
 
@@ -306,13 +316,13 @@ spec:
     ['Cost/hr at end', (r) => last(r).costHr, (x) => money(x, 3), 'lower'],
     ['Average nodes', (r) => r.summary.avgNodes, (x) => x.toFixed(1), 'lower'],
     ['Peak nodes', (r) => r.summary.peakNodes, int, null],
-    ['Avg CPU requested / allocatable', (r) => r.summary.avgUtil, pct, 'higher'],
-    ['Consolidation commands', (r) => r.summary.totalCommands, int, null],
-    ['  Emptiness / multi-node / single-node', (r) => r.summary.commands, (c) => `${c.Emptiness} / ${c.MultiNodeConsolidation} / ${c.SingleNodeConsolidation}`, 'none'],
-    ['Commands abandoned at validation', (r) => r.summary.abandoned, int, null],
+    ['Avg CPU requested / allocatable', (r) => r.summary.avgUtil, pct, 'higher', 'utilization'],
+    ['Consolidation commands', (r) => r.summary.totalCommands, int, null, 'consolidation'],
+    ['  Emptiness / multi-node / single-node', (r) => r.summary.commands, (c) => `${c.Emptiness} / ${c.MultiNodeConsolidation} / ${c.SingleNodeConsolidation}`, 'none', 'methods'],
+    ['Commands abandoned at validation', (r) => r.summary.abandoned, int, null, 'validation'],
     ['Nodes launched', (r) => r.summary.nodesLaunched, int, null],
-    ['Pod evictions', (r) => r.summary.evictions, int, 'lower'],
-    ['Pod-minutes pending', (r) => r.summary.podPendingMinutes, int, 'lower'],
+    ['Pod evictions', (r) => r.summary.evictions, int, 'lower', 'eviction'],
+    ['Pod-minutes pending', (r) => r.summary.podPendingMinutes, int, 'lower', 'pendingMinutes'],
   ];
 
   function delta(va, vb, fmt, better) {
@@ -329,9 +339,10 @@ spec:
     const { a, b } = results;
     $('#summary').innerHTML =
       '<tr><th>Metric</th><th class="num"><span class="key a"></span>A</th><th class="num"><span class="key b"></span>B</th><th class="num">B vs A</th></tr>' +
-      METRICS.map(([label, get, fmt, better]) => {
+      METRICS.map(([label, get, fmt, better, term]) => {
         const va = get(a), vb = get(b);
-        return `<tr><td>${label.startsWith('  ') ? '<span class="muted" style="padding-left:12px">' + label.trim() + '</span>' : label}</td>
+        const name = label.startsWith('  ') ? '<span class="muted" style="padding-left:12px">' + label.trim() + '</span>' : label;
+        return `<tr><td>${name}${term ? ' ' + help(term, label.trim()) : ''}</td>
           <td class="num">${fmt(va)}</td><td class="num">${fmt(vb)}</td><td class="num">${delta(va, vb, fmt, better)}</td></tr>`;
       }).join('');
 
@@ -400,6 +411,42 @@ spec:
     }
   }
 
+  // --- glossary -----------------------------------------------------------------
+
+  function renderGlossary(query) {
+    const q = query.trim().toLowerCase();
+    const html = KSimGlossary.map((g) => {
+      const terms = g.terms.filter((t) => !q || (t.term + ' ' + t.body).toLowerCase().includes(q));
+      if (!terms.length) return '';
+      return `<h3>${g.group}</h3>` + terms.map((t) => `<dl id="term-${t.id}"><dt>${t.term}</dt><dd>${t.body}</dd>` +
+        (t.example ? `<dd class="example">${t.example}</dd>` : '') + '</dl>').join('');
+    }).join('');
+    $('#glossary-body').innerHTML = html || '<p class="muted">No matching terms.</p>';
+  }
+
+  function openGlossary(id) {
+    const wasOpen = document.body.classList.contains('glossary-open');
+    document.body.classList.add('glossary-open');
+    $('#glossary').setAttribute('aria-hidden', 'false');
+    if (!id) { if (wasOpen) closeGlossary(); else $('#glossary-search').focus(); return; }
+    if ($('#glossary-search').value) { $('#glossary-search').value = ''; renderGlossary(''); }
+    const el = document.getElementById('term-' + id);
+    if (!el) return;
+    const panel = $('#glossary');
+    panel.scrollTo({ top: el.offsetTop - $('.g-sticky').offsetHeight - 8, behavior: wasOpen ? 'smooth' : 'auto' });
+    el.classList.remove('flash');
+    void el.offsetWidth;
+    el.classList.add('flash');
+    if (!wasOpen) setTimeout(renderCharts, 260); // the page got narrower
+  }
+
+  function closeGlossary() {
+    if (!document.body.classList.contains('glossary-open')) return;
+    document.body.classList.remove('glossary-open');
+    $('#glossary').setAttribute('aria-hidden', 'true');
+    setTimeout(renderCharts, 260);
+  }
+
   // --- wiring -------------------------------------------------------------------
 
   function init() {
@@ -425,6 +472,8 @@ spec:
       if (e.target.type === 'checkbox' || e.target.tagName === 'SELECT') onInput(e);
     });
     document.addEventListener('click', (e) => {
+      const helpBtn = e.target.closest('[data-term]');
+      if (helpBtn) { e.preventDefault(); openGlossary(helpBtn.dataset.term); return; }
       if (e.target.closest('button[data-action]')) onAction(e);
       const chip = e.target.closest('.chip');
       if (chip) { logKind = chip.dataset.kind; renderLogs(); }
@@ -440,6 +489,10 @@ spec:
       s.focus();
       s.setSelectionRange(pos, pos);
     });
+    $('#glossary-close').addEventListener('click', closeGlossary);
+    $('#glossary-search').addEventListener('input', (e) => renderGlossary(e.target.value));
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeGlossary(); });
+    renderGlossary('');
     let resizeTimer = null;
     window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(renderCharts, 150); });
     run();

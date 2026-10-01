@@ -14,6 +14,7 @@
       <p class="sub">See how two NodePool disruption settings behave on the same workload over time. Models Karpenter v1, simplified (see <a href="#assumptions">assumptions</a>).</p>
     </div>
     <div class="row">
+      <button id="open-glossary" type="button" data-term="">Glossary</button>
       <button id="copy-link" type="button">Copy share link</button>
     </div>
   </header>
@@ -38,7 +39,7 @@
     <div class="table-scroll"><table class="wl-table" id="workloads"></table></div>
     <div class="row" style="margin-top:10px">
       <button type="button" id="add-workload">+ Add workload</button>
-      <span class="muted">DaemonSet overhead per node:</span>
+      <span class="muted">DaemonSet overhead per node <button type="button" class="help" data-term="daemonset" aria-label="Explain DaemonSet overhead">?</button></span>
       <label class="shape-params">CPU <input type="number" data-path="scenario.daemonset.cpu" data-type="number" class="narrow">m</label>
       <label class="shape-params">Mem <input type="number" data-path="scenario.daemonset.mem" data-type="number" class="narrow">Mi</label>
       <label class="shape-params">Pods <input type="number" data-path="scenario.daemonset.pods" data-type="number" class="narrow"></label>
@@ -59,7 +60,7 @@
   </section>
 
   <section class="card">
-    <p class="muted" style="margin-top:0">Hover any chart to sync the crosshair. Click to pin it; click a log line to jump to its time.</p>
+    <p class="muted" style="margin-top:0">New to these terms? Open the glossary <button type="button" class="help" data-term="consolidation" aria-label="Explain consolidation">?</button>. Hover any chart to sync the crosshair. Click to pin it; click a log line to jump to its time.</p>
     <div class="charts">
       <div id="chart-cost"></div>
       <div id="chart-nodes"></div>
@@ -69,7 +70,7 @@
   </section>
 
   <section class="card">
-    <h2>Node timeline</h2>
+    <h2>Node timeline <button type="button" class="help" data-term="node" aria-label="Explain node">?</button></h2>
     <p class="muted">One row per node. The lighter segment is launch time before the node is Ready. Hover a row for details.</p>
     <div class="grid2">
       <div id="timeline-a"></div>
@@ -78,7 +79,7 @@
   </section>
 
   <section class="card">
-    <h2>Decision log</h2>
+    <h2>Decision log <button type="button" class="help" data-term="methods" aria-label="Explain the decision log">?</button></h2>
     <div class="filters" id="filters"></div>
     <div class="grid2">
       <div><h3><span class="key a"></span>A</h3><div class="log" id="log-a"></div></div>
@@ -102,8 +103,19 @@
     </ul>
   </section>
 </main>
+<aside id="glossary" aria-label="Glossary" aria-hidden="true">
+  <div class="g-sticky">
+    <div class="g-head">
+      <h2>Glossary</h2>
+      <button type="button" id="glossary-close" aria-label="Close glossary">✕</button>
+    </div>
+    <input type="text" id="glossary-search" placeholder="Search, e.g. PDB">
+  </div>
+  <div id="glossary-body"></div>
+</aside>
 <script src="engine.js"></script>
 <script src="presets.js"></script>
+<script src="glossary.js"></script>
 <script src="charts.js"></script>
 <script src="app.js"></script>
 </body>
