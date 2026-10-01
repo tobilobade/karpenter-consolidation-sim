@@ -36,6 +36,14 @@
         for (const id of n.pods) cpu += s.pods.get(id).cpu;
         assert(cpu === n.cpu, `${n.name} cpu accounting drift at t=${s.t}`);
       }
+      let notRunning = 0;
+      for (const w of s.wls) {
+        let running = 0;
+        for (const id of w.pods) if (s.pods.get(id).state === 'running') running++; else notRunning++;
+        assert(running === w.running, `${w.name} running counter drift at t=${s.t}`);
+      }
+      assert(notRunning === s.notRunning, `notRunning counter drift at t=${s.t}`);
+      assert([...s.pods.values()].filter((p) => p.state === 'pending').length === s.pendingSet.size, `pendingSet drift at t=${s.t}`);
     };
     return s.run();
   }

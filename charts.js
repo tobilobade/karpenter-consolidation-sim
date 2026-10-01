@@ -156,25 +156,28 @@
 
     const nodes = opts.nodes;
     const end = opts.duration * 3600;
-    const rowH = Math.max(5, Math.min(16, Math.floor(260 / Math.max(1, nodes.length))));
-    const gap = rowH >= 8 ? 2 : 1;
-    const height = nodes.length * (rowH + gap) + 30;
+    // Small fleets get readable rows; big ones are squeezed into at most ~520px.
+    const count = Math.max(1, nodes.length);
+    const pitch = count <= 52 ? Math.max(6, Math.min(18, Math.floor(260 / count))) : Math.min(6, 520 / count);
+    const gap = pitch >= 10 ? 2 : pitch >= 4 ? 1 : 0;
+    const rowH = pitch - gap;
+    const height = Math.ceil(nodes.length * pitch) + 30;
     const f = frame(container, height, opts.duration, 1, null);
     const tt = tooltip(container);
 
     nodes.forEach((nd, i) => {
-      const y0 = f.m.t + i * (rowH + gap);
+      const y0 = f.m.t + i * pitch;
       const stop = nd.terminatedAt === null ? end : nd.terminatedAt;
       const readyAt = Math.min(nd.readyAt, stop);
       const g = svgEl('g', {}, f.svg);
       const xs = f.x(nd.createdAt), xr = f.x(readyAt), xe = Math.max(f.x(stop), xs + 1);
-      svgEl('rect', { class: 'bar launching ' + opts.cls, x: xs, y: y0, width: Math.max(0.5, xr - xs), height: rowH, rx: 1.5 }, g);
-      if (xe > xr) svgEl('rect', { class: 'bar ' + opts.cls, x: xr, y: y0, width: xe - xr, height: rowH, rx: 1.5 }, g);
+      svgEl('rect', { class: 'bar launching ' + opts.cls, x: xs, y: y0, width: Math.max(0.5, xr - xs), height: rowH, rx: rowH >= 4 ? 1.5 : 0 }, g);
+      if (xe > xr) svgEl('rect', { class: 'bar ' + opts.cls, x: xr, y: y0, width: xe - xr, height: rowH, rx: rowH >= 4 ? 1.5 : 0 }, g);
       if (rowH >= 12 && xe - xr > nd.type.length * 6 + 8) {
         svgEl('text', { class: 'bar-label', x: xr + 4, y: y0 + rowH - 3 }, g).textContent = nd.type;
       }
       // Hit target spans the whole row so thin bars are still easy to hover.
-      const hit = svgEl('rect', { x: f.m.l, y: y0 - gap / 2, width: f.width - f.m.l - f.m.r, height: rowH + gap, fill: 'transparent' }, g);
+      const hit = svgEl('rect', { x: f.m.l, y: y0, width: f.width - f.m.l - f.m.r, height: pitch, fill: 'transparent' }, g);
       hit.addEventListener('mousemove', (e) => {
         const r = container.getBoundingClientRect();
         const life = nd.terminatedAt === null ? 'still running at end' : `terminated ${clock(nd.terminatedAt)} (${nd.endReason || 'unknown'})`;

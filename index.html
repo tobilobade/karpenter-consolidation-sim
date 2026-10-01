@@ -53,13 +53,13 @@
 
   <section class="card" id="error"></section>
 
-  <section class="card">
-    <h2>Results</h2>
+  <section class="card results">
+    <h2>Results <span id="busy" class="muted" style="display:none;font-weight:400">Simulating…</span></h2>
     <p id="verdict"></p>
     <table id="summary"></table>
   </section>
 
-  <section class="card">
+  <section class="card results">
     <p class="muted" style="margin-top:0">New to these terms? Open the glossary <button type="button" class="help" data-term="consolidation" aria-label="Explain consolidation">?</button>. Hover any chart to sync the crosshair. Click to pin it; click a log line to jump to its time.</p>
     <div class="charts">
       <div id="chart-cost"></div>
@@ -69,7 +69,7 @@
     </div>
   </section>
 
-  <section class="card">
+  <section class="card results">
     <h2>Node timeline <button type="button" class="help" data-term="node" aria-label="Explain node">?</button></h2>
     <p class="muted">One row per node. The lighter segment is launch time before the node is Ready. Hover a row for details.</p>
     <div class="grid2">
@@ -100,7 +100,7 @@
       <li><b>kube-scheduler</b> places pods on Ready nodes with NodeResourcesFit scoring, either LeastAllocated (the default, which spreads pods) or MostAllocated (which packs them).</li>
       <li><b>Instance types:</b> c5/m5/r5, large to 8xlarge, at approximate us-east-1 on-demand prices. Allocatable subtracts EKS kube-reserved, the eviction threshold, 7.5% VM memory overhead, ENI max-pods and DaemonSet overhead.</li>
       <li><b>Expiration:</b> nodes older than <code>expireAfter</code> start draining right away, ignoring budgets, with no replacement launched first. Draining respects PDBs and do-not-disrupt until <code>terminationGracePeriod</code>, then the remaining pods are force-deleted. Draining nodes count against every disruption budget.</li>
-      <li><b>Not modelled:</b> spot and spot-to-spot, drift, affinity and topology spread, NodePool limits, pod priority, <code>terminationGracePeriod</code>, and multiple NodePools.</li>
+      <li><b>Not modelled:</b> spot and spot-to-spot, drift, affinity and topology spread, NodePool limits, pod priority, and multiple NodePools.</li>
     </ul>
   </section>
 </main>

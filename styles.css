@@ -165,3 +165,5 @@ body.glossary-open #glossary { transform: none; visibility: visible; }
 @keyframes flash { from { background: var(--grid); } to { background: transparent; } }
 .wl-table th { white-space: nowrap; }
 .g-sticky { position: sticky; top: -16px; background: var(--surface); padding-top: 16px; margin-top: -16px; z-index: 1; }
+.results { transition: opacity 0.15s; }
+.results.stale { opacity: 0.5; }

@@ -22,7 +22,7 @@
   const MULTI_NODE_MAX = 100;    // multi-node consolidation considers at most 100 candidates
   const SAMPLE_EVERY = 60;
   const VM_MEMORY_OVERHEAD = 0.075; // Karpenter's default vmMemoryOverheadPercent
-  const MAX_LOG = 5000;
+  const MAX_LOG = 20000;
   const NOTE_COOLDOWN = 1800;
 
   // us-east-1 on-demand prices (approximate, $/hr).
@@ -153,7 +153,9 @@
     this.pods = new Map();
     this.wls = scenario.workloads
       .filter((w) => !w.onlyIn || !config.side || w.onlyIn === config.side)
-      .map((w, i) => Object.assign({}, w, { idx: i, pods: new Set() }));
+      .map((w, i) => Object.assign({}, w, { idx: i, pods: new Set(), running: 0 }));
+    this.pendingSet = new Set();
+    this.notRunning = 0;
     this.nextPodId = 1;
     this.nextNodeId = 1;
     this.version = 0;
@@ -207,19 +209,33 @@
     const p = { id: this.nextPodId++, wl: wl.idx, cpu: wl.cpu, mem: wl.mem, node: null, state: 'pending', created: this.t };
     this.pods.set(p.id, p);
     wl.pods.add(p.id);
+    this.pendingSet.add(p);
+    this.notRunning++;
     this.version++;
   };
 
   Sim.prototype.deletePod = function (p) {
     if (p.node !== null) this.unbind(p);
+    if (p.state === 'running') this.wls[p.wl].running--; else this.notRunning--;
+    this.pendingSet.delete(p);
     this.pods.delete(p.id);
     this.wls[p.wl].pods.delete(p.id);
     this.version++;
   };
 
+  // All pod state changes go through here so the running / pending counters stay exact.
+  Sim.prototype.setState = function (p, state) {
+    const wl = this.wls[p.wl];
+    if (p.state === 'running') wl.running--; else this.notRunning--;
+    if (p.state === 'pending') this.pendingSet.delete(p);
+    p.state = state;
+    if (state === 'running') wl.running++; else this.notRunning++;
+    if (state === 'pending') this.pendingSet.add(p);
+  };
+
   Sim.prototype.bind = function (p, n, state) {
     p.node = n.id;
-    p.state = state;
+    this.setState(p, state);
     n.pods.add(p.id);
     n.cpu += p.cpu;
     n.mem += p.mem;
@@ -234,7 +250,7 @@
     n.mem -= p.mem;
     n.lastPodEvent = this.t;
     p.node = null;
-    p.state = 'pending';
+    this.setState(p, 'pending');
   };
 
   Sim.prototype.reconcileWorkloads = function () {
@@ -244,25 +260,36 @@
       if (desired > current) {
         for (let i = current; i < desired; i++) this.createPod(wl);
       } else if (desired < current) {
-        // ReplicaSet scale-down ranking: unscheduled first, then pods on nodes with
-        // more replicas of this workload, then newest first.
-        const pods = [...wl.pods].map((id) => this.pods.get(id));
-        const perNode = new Map();
-        for (const p of pods) if (p.node !== null) perNode.set(p.node, (perNode.get(p.node) || 0) + 1);
-        const stateRank = { pending: 0, nominated: 1, running: 2 };
-        pods.sort((a, b) =>
-          stateRank[a.state] - stateRank[b.state] ||
-          (perNode.get(b.node) || 0) - (perNode.get(a.node) || 0) ||
-          b.created - a.created || b.id - a.id);
-        for (const p of pods.slice(0, current - desired)) this.deletePod(p);
+        // ReplicaSet scale-down ranking: unscheduled first, then pods on the node with the
+        // most replicas of this workload, newest first.
+        const k = current - desired;
+        const victims = [];
+        const byNode = new Map();
+        const unscheduled = { pending: [], nominated: [] };
+        for (const id of wl.pods) {
+          const p = this.pods.get(id);
+          if (p.state === 'running') {
+            if (!byNode.has(p.node)) byNode.set(p.node, []);
+            byNode.get(p.node).push(p); // creation order, so newest is last
+          } else unscheduled[p.state].push(p);
+        }
+        for (const p of unscheduled.pending.reverse().concat(unscheduled.nominated.reverse())) {
+          if (victims.length < k) victims.push(p);
+        }
+        while (victims.length < k) {
+          let best = null;
+          for (const arr of byNode.values()) if (arr.length && (!best || arr.length > best.length)) best = arr;
+          if (!best) break;
+          victims.push(best.pop());
+        }
+        for (const p of victims) this.deletePod(p);
       }
     }
   };
 
   Sim.prototype.pdbAllowed = function (wl) {
     if (!wl.pdb) return Infinity;
-    let healthy = 0;
-    for (const id of wl.pods) if (this.pods.get(id).state === 'running') healthy++;
+    const healthy = wl.running;
     const desired = desiredReplicas(wl.shape, this.t);
     const minHealthy = wl.pdb.minAvailable != null ? wl.pdb.minAvailable : desired - wl.pdb.maxUnavailable;
     return healthy - minHealthy;
@@ -297,7 +324,7 @@
       if (n.state === 'launching' && this.t >= n.readyAt) {
         n.state = 'ready';
         n.lastPodEvent = this.t;
-        for (const id of n.pods) this.pods.get(id).state = 'running';
+        for (const id of n.pods) this.setState(this.pods.get(id), 'running');
         this.version++;
       }
     }
@@ -353,9 +380,8 @@
   };
 
   Sim.prototype.schedule = function () {
-    const pending = [];
-    for (const p of this.pods.values()) if (p.state === 'pending') pending.push(p);
-    if (!pending.length) return;
+    if (!this.pendingSet.size) return;
+    const pending = [...this.pendingSet];
     pending.sort(bySizeDesc);
     const ready = this.live.filter((n) => n.state === 'ready');
     const inflight = this.live.filter((n) => n.state === 'launching');
@@ -481,21 +507,50 @@
   };
 
   // Can the candidates' pods fit on the rest of the cluster plus at most one new, cheaper node?
-  Sim.prototype.simulate = function (cands) {
-    const ids = new Set(cands.map((c) => c.node.id));
-    const others = [];
-    for (const n of this.live) {
-      if ((n.state === 'ready' || n.state === 'launching') && !ids.has(n.id)) {
-        others.push({ cpu: n.type.allocCpu - n.cpu, mem: n.type.allocMem - n.mem, slots: n.type.podSlots - n.pods.size });
+  // Free capacity on every schedulable node, after pending pods have claimed their share.
+  // Built once per evaluation; simulate() works on copies.
+  Sim.prototype.snapshotCapacity = function () {
+    const nodes = this.live.filter((n) => n.state === 'ready' || n.state === 'launching');
+    const cpu = new Float64Array(nodes.length), mem = new Float64Array(nodes.length), slots = new Int32Array(nodes.length);
+    const index = new Map();
+    nodes.forEach((n, i) => {
+      cpu[i] = n.type.allocCpu - n.cpu; mem[i] = n.type.allocMem - n.mem; slots[i] = n.type.podSlots - n.pods.size;
+      index.set(n.id, i);
+    });
+    const pending = [...this.pendingSet].sort(bySizeDesc);
+    for (const p of pending) {
+      for (let i = 0; i < nodes.length; i++) {
+        if (cpu[i] >= p.cpu && mem[i] >= p.mem && slots[i] >= 1) { cpu[i] -= p.cpu; mem[i] -= p.mem; slots[i]--; break; }
       }
     }
+    let freeCpu = 0, freeMem = 0;
+    for (let i = 0; i < nodes.length; i++) { freeCpu += Math.max(0, cpu[i]); freeMem += Math.max(0, mem[i]); }
+    this.cap = { cpu, mem, slots, index, freeCpu, freeMem };
+  };
+
+  // Cheap check: even in the best case, can these candidates be deleted or replaced more cheaply?
+  Sim.prototype.mightConsolidate = function (c) {
+    const cap = this.cap, i = cap.index.get(c.node.id);
+    let cpu = 0, mem = 0;
+    for (const p of c.pods) { cpu += p.cpu; mem += p.mem; }
+    const otherCpu = cap.freeCpu - Math.max(0, cap.cpu[i]), otherMem = cap.freeMem - Math.max(0, cap.mem[i]);
+    const restCpu = cpu - otherCpu, restMem = mem - otherMem;
+    if (restCpu <= 0 && restMem <= 0) return true;
+    const t = this.cheapestFitting(Math.max(0, restCpu), Math.max(0, restMem), 1);
+    return !!t && t.price < c.price;
+  };
+
+  Sim.prototype.simulate = function (cands) {
+    const cap = this.cap;
+    const cpu = cap.cpu.slice(), mem = cap.mem.slice(), slots = cap.slots.slice();
+    for (const c of cands) { const i = cap.index.get(c.node.id); if (i !== undefined) cpu[i] = -Infinity; }
+    const n = cpu.length;
     const take = (p) => {
-      const o = others.find((o) => o.cpu >= p.cpu && o.mem >= p.mem && o.slots >= 1);
-      if (!o) return false;
-      o.cpu -= p.cpu; o.mem -= p.mem; o.slots--;
-      return true;
+      for (let i = 0; i < n; i++) {
+        if (cpu[i] >= p.cpu && mem[i] >= p.mem && slots[i] >= 1) { cpu[i] -= p.cpu; mem[i] -= p.mem; slots[i]--; return true; }
+      }
+      return false;
     };
-    for (const p of this.pendingSnapshot) take(p); // pending pods claim free capacity first
 
     const pods = [].concat(...cands.map((c) => c.pods)).sort(bySizeDesc);
     const bins = [];
@@ -550,6 +605,7 @@
       this.budgetMessage('Underutilized', `${cands.length} candidate(s)`, info));
     if (allowed <= 0) return null;
     for (const c of cands) {
+      if (!this.mightConsolidate(c)) continue;
       const r = this.simulate([c]);
       if (r.ok) return Object.assign({ method: 'SingleNodeConsolidation' }, r);
     }
@@ -576,7 +632,7 @@
     this.lastEvalVersion = this.version;
     this.lastEvalTime = this.t;
 
-    this.pendingSnapshot = [...this.pods.values()].filter((p) => p.state === 'pending').sort(bySizeDesc);
+    this.snapshotCapacity();
     const cands = this.candidates(true);
     let cmd = this.emptiness(cands);
     if (!cmd && this.cfg.consolidationPolicy === 'WhenEmptyOrUnderutilized') {
@@ -589,7 +645,7 @@
   };
 
   Sim.prototype.validateAndExecute = function (cmd) {
-    this.pendingSnapshot = [...this.pods.values()].filter((p) => p.state === 'pending').sort(bySizeDesc);
+    this.snapshotCapacity();
     const fresh = new Map(this.candidates(false).map((c) => [c.node.id, c]));
     const chosen = cmd.candidates.map((id) => fresh.get(id));
     const abandon = (why) => {
@@ -635,8 +691,7 @@
   Sim.prototype.account = function () {
     let price = 0, alloc = 0, req = 0;
     for (const n of this.live) { price += n.type.price; alloc += n.type.allocCpu; req += n.cpu; }
-    let pending = 0;
-    for (const p of this.pods.values()) if (p.state !== 'running') pending++;
+    const pending = this.notRunning;
     this.stats.cost += (price * STEP) / 3600;
     this.stats.pendingPodSeconds += pending * STEP;
     if (this.t % SAMPLE_EVERY === 0) {

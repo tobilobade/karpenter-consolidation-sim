@@ -22,6 +22,10 @@ New to the terms? Click **Glossary** (or any **?** next to a setting) for plain-
 | Big scale-down | Budget % controls how fast stranded capacity is removed |
 | Blockers | do-not-disrupt pods and strict PDBs pin nodes, so cost stays high |
 
+## Scale
+
+Handles clusters from a handful of pods up to ~10,000 pods / ~1,000 nodes. Each config runs in its own Web Worker, so the page stays responsive (a 24h, 10k-pod run takes ~5s). When opened from `file://`, browsers block workers and the sim runs inline.
+
 ## Model
 
 `engine.js` is a pure-JS discrete-time model with 10s ticks. It covers Emptiness, then multi-node consolidation, then single-node consolidation, with 15s validation, budgets, PDB/do-not-disrupt blockers, replace-before-drain, Karpenter-style bin-packing, and EKS allocatable math. The UI's "How the model works" section lists all assumptions and what isn't modelled (spot, drift, affinity/topology, limits, priority).
@@ -37,6 +41,7 @@ It's for building intuition, not predicting exact numbers. Validate important sc
 ## Files
 
 - `engine.js`: simulation (no DOM)
+- `worker.js`: runs the engine off the main thread
 - `presets.js`: scenarios
 - `glossary.js`: plain-language term explanations
 - `charts.js`: SVG line charts + node timeline

@@ -299,21 +299,71 @@ ${c.terminationGracePeriod ? `      terminationGracePeriod: ${c.terminationGrace
     el.textContent = msg ? 'Simulation error: ' + msg : '';
   }
 
-  function run() {
-    if (document.querySelector('input.invalid')) return showError('fix the highlighted fields');
-    let a, b;
-    try {
-      a = KSim.simulate(Object.assign({ side: 'a' }, state.a), state.scenario);
-      b = KSim.simulate(Object.assign({ side: 'b' }, state.b), state.scenario);
-    } catch (e) {
-      return showError(e.message);
+  // Each config runs in its own Web Worker so big clusters don't freeze the page.
+  // Browsers block workers on file:// pages, so fall back to running inline there.
+  let workers = null;
+  let runId = 0;
+  let busy = false;
+
+  function getWorkers() {
+    if (workers === null) {
+      try { workers = [new Worker('worker.js'), new Worker('worker.js')]; } catch (e) { workers = false; }
     }
+    return workers;
+  }
+
+  function setBusy(on) {
+    busy = on;
+    $('#busy').style.display = on ? 'inline' : 'none';
+    document.querySelectorAll('.results').forEach((el) => el.classList.toggle('stale', on));
+  }
+
+  function finish(a, b) {
+    setBusy(false);
     showError(null);
     results = { a, b };
     renderSummary();
     renderCharts();
     renderLogs();
     saveHash();
+  }
+
+  function runInline() {
+    let a, b;
+    try {
+      a = KSim.simulate(Object.assign({ side: 'a' }, state.a), state.scenario);
+      b = KSim.simulate(Object.assign({ side: 'b' }, state.b), state.scenario);
+    } catch (e) {
+      setBusy(false);
+      return showError(e.message);
+    }
+    finish(a, b);
+  }
+
+  function run() {
+    if (document.querySelector('input.invalid')) return showError('fix the highlighted fields');
+    if (busy && workers) { workers.forEach((w) => w.terminate()); workers = null; } // drop the outdated run
+    const ws = getWorkers();
+    const id = ++runId;
+    setBusy(true);
+    if (!ws) return setTimeout(runInline, 20); // let the "Simulating…" label paint first
+    const out = {};
+    let done = 0, error = null;
+    ['a', 'b'].forEach((side, i) => {
+      ws[i].onmessage = (e) => {
+        if (e.data.id !== id) return;
+        if (e.data.error) error = e.data.error; else out[side] = e.data.result;
+        if (++done < 2) return;
+        if (error) { setBusy(false); showError(error); } else finish(out.a, out.b);
+      };
+      ws[i].onerror = (e) => {
+        e.preventDefault();
+        ws.forEach((w) => w.terminate());
+        workers = false;
+        runInline();
+      };
+      ws[i].postMessage({ id, cfg: Object.assign({ side }, state[side]), scenario: state.scenario });
+    });
   }
 
   const money = (x, d) => '$' + x.toFixed(d === undefined ? 2 : d);
