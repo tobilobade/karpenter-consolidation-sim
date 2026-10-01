@@ -103,6 +103,13 @@
     return total;
   }
 
+  // Like parseDuration, but empty / missing means "not set".
+  function optionalDuration(v) {
+    if (v === undefined || v === null) return null;
+    if (typeof v === 'number') return v;
+    return String(v).trim() === '' ? null : parseDuration(v);
+  }
+
   // Karpenter scales percentages against the NodePool's node count, rounding up.
   function budgetValue(nodes, total) {
     const s = String(nodes).trim();
@@ -117,6 +124,11 @@
     return (h >= start && h < end) || (h + 24 >= start && h + 24 < end);
   }
 
+  function tgpClock(t) {
+    const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60);
+    return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+  }
+
   function bySizeDesc(a, b) { return b.cpu - a.cpu || b.mem - a.mem || a.id - b.id; }
 
   function fmtMoney(x) { return '$' + x.toFixed(3); }
@@ -126,6 +138,8 @@
   function Sim(config, scenario) {
     this.cfg = Object.assign({}, config, {
       consolidateAfter: typeof config.consolidateAfter === 'string' ? parseDuration(config.consolidateAfter) : config.consolidateAfter,
+      expireAfter: optionalDuration(config.expireAfter),
+      terminationGracePeriod: optionalDuration(config.terminationGracePeriod),
     });
     config = this.cfg;
     this.sc = scenario;
@@ -152,7 +166,7 @@
     this.notes = new Map();
     this.budgetSig = '';
     this.stats = {
-      cost: 0, evictions: 0, pendingPodSeconds: 0, nodesLaunched: 0, nodesDisrupted: 0, abandoned: 0,
+      cost: 0, evictions: 0, pendingPodSeconds: 0, nodesLaunched: 0, nodesDisrupted: 0, nodesExpired: 0, abandoned: 0,
       commands: { Emptiness: 0, MultiNodeConsolidation: 0, SingleNodeConsolidation: 0 },
     };
   }
@@ -180,6 +194,7 @@
   Sim.prototype.tick = function () {
     this.reconcileWorkloads();
     this.progressNodes();
+    this.expire();
     this.schedule();
     this.drain();
     this.disrupt();
@@ -288,10 +303,31 @@
     }
     this.replacements = this.replacements.filter((r) => {
       if (r.replacement.state !== 'ready') return true;
-      for (const c of r.candidates) c.state = 'draining';
+      for (const c of r.candidates) this.startDrain(c);
       this.emit('disrupt', `replacement ${r.replacement.name}/${r.replacement.type.name} is ready, draining ${r.candidates.map((c) => c.name).join(', ')}`);
       return false;
     });
+  };
+
+  Sim.prototype.startDrain = function (n) {
+    n.state = 'draining';
+    n.drainStart = this.t;
+    this.version++;
+  };
+
+  // expireAfter is forceful: it ignores disruption budgets, do-not-disrupt and PDBs when
+  // deciding to start, and no replacement is pre-launched. Draining still respects them,
+  // up to terminationGracePeriod.
+  Sim.prototype.expire = function () {
+    const after = this.cfg.expireAfter;
+    if (after === null) return;
+    for (const n of this.live) {
+      if ((n.state !== 'ready' && n.state !== 'launching') || this.t - n.createdAt < after) continue;
+      n.endReason = 'Expired';
+      this.stats.nodesExpired++;
+      this.startDrain(n);
+      this.emit('expire', `${n.name}/${n.type.name} reached expireAfter, draining ${n.pods.size} pod(s)`);
+    }
   };
 
   Sim.prototype.fits = function (n, p) {
@@ -363,11 +399,17 @@
   Sim.prototype.drain = function () {
     for (const n of this.live.slice()) {
       if (n.state !== 'draining') continue;
+      const tgp = this.cfg.terminationGracePeriod;
+      if (tgp !== null && this.t >= n.drainStart + tgp && n.pods.size) {
+        this.emit('terminate', `${n.name}: terminationGracePeriod elapsed, force-deleting ${n.pods.size} remaining pod(s)`);
+        for (const id of [...n.pods]) { this.stats.evictions++; this.deletePod(this.pods.get(id)); }
+      }
       for (const id of [...n.pods]) {
         const p = this.pods.get(id);
         const wl = this.wls[p.wl];
         if (wl.doNotDisrupt) {
-          this.note('drain:' + n.id, 'blocked', `${n.name}: drain waiting on do-not-disrupt pod of ${wl.name}`);
+          this.note('drain:' + n.id, 'blocked', `${n.name}: drain waiting on do-not-disrupt pod of ${wl.name}` +
+            (tgp !== null ? ` (force-deleted at ${tgpClock(n.drainStart + tgp)})` : ' (no terminationGracePeriod, so it waits forever)'));
           continue;
         }
         if (p.state === 'running' && this.pdbAllowed(wl) <= 0) {
@@ -383,17 +425,29 @@
 
   // --- disruption -------------------------------------------------------------
 
-  Sim.prototype.allowedDisruptions = function (reason) {
+  // Nodes being deleted for ANY reason (consolidation, expiry, ...) use up the budget.
+  Sim.prototype.budgetInfo = function (reason) {
     const total = this.live.length;
     let disrupting = 0;
     for (const n of this.live) if (n.state === 'draining' || n.state === 'tainted') disrupting++;
-    let min = Infinity;
+    let configured = Infinity;
     for (const b of this.cfg.budgets) {
       if (b.reasons && b.reasons.length && !b.reasons.includes(reason)) continue;
       if (!inWindow(b.schedule, this.t)) continue;
-      min = Math.min(min, budgetValue(b.nodes, total));
+      configured = Math.min(configured, budgetValue(b.nodes, total));
     }
-    return min === Infinity ? Infinity : Math.max(0, min - disrupting);
+    const allowed = configured === Infinity ? Infinity : Math.max(0, configured - disrupting);
+    return { allowed, configured, disrupting };
+  };
+
+  Sim.prototype.allowedDisruptions = function (reason) { return this.budgetInfo(reason).allowed; };
+
+  // Real Karpenter only reports a blocked budget when the configured value is 0, not when
+  // in-flight deletions have used it up, so we call that case out explicitly.
+  Sim.prototype.budgetMessage = function (reason, waiting, info) {
+    if (info.configured === 0) return `${waiting} waiting: disruption budget for ${reason} is set to 0`;
+    return `${waiting} waiting: ${reason} budget is ${info.configured} node(s), but ${info.disrupting} node(s) are already ` +
+      `being deleted, so 0 are left. Real Karpenter logs nothing here (it only reports budgets set to 0)`;
   };
 
   Sim.prototype.budgetSignature = function () {
@@ -467,8 +521,9 @@
   Sim.prototype.emptiness = function (cands) {
     const empty = cands.filter((c) => c.pods.length === 0);
     if (!empty.length) return null;
-    const allowed = this.allowedDisruptions('Empty');
-    this.note('budget:Empty', 'budget', allowed <= 0 && `${empty.length} empty node(s) waiting: disruption budget for Empty allows 0`);
+    const info = this.budgetInfo('Empty');
+    const allowed = info.allowed;
+    this.note('budget:Empty', 'budget', allowed <= 0 && this.budgetMessage('Empty', `${empty.length} empty node(s)`, info));
     if (allowed <= 0) return null;
     const chosen = empty.slice(0, allowed);
     return { method: 'Emptiness', decision: 'delete', candidates: chosen.map((c) => c.node.id), savings: chosen.reduce((s, c) => s + c.price, 0) };
@@ -489,9 +544,10 @@
   };
 
   Sim.prototype.singleNode = function (cands) {
-    const allowed = this.allowedDisruptions('Underutilized');
+    const info = this.budgetInfo('Underutilized');
+    const allowed = info.allowed;
     this.note('budget:Underutilized', 'budget', allowed <= 0 && cands.length > 0 &&
-      `${cands.length} candidate(s) waiting: disruption budget for Underutilized allows 0`);
+      this.budgetMessage('Underutilized', `${cands.length} candidate(s)`, info));
     if (allowed <= 0) return null;
     for (const c of cands) {
       const r = this.simulate([c]);
@@ -563,7 +619,7 @@
     const head = `[${cmd.method}] disrupting via ${cmd.decision} (reason: ${reason}), terminating ${chosen.length} node(s) (${podCount} pods) ${names}`;
     for (const c of chosen) c.node.endReason = cmd.method;
     if (cmd.decision === 'delete') {
-      for (const c of chosen) c.node.state = 'draining';
+      for (const c of chosen) this.startDrain(c.node);
       this.emit('disrupt', `${head}, saving ${fmtMoney(cmd.savings)}/hr`);
     } else {
       const replacement = this.launchNode(this.typeByName.get(cmd.replacementType), 'replacement');
@@ -609,6 +665,7 @@
         commands: Object.assign({}, c),
         totalCommands: c.Emptiness + c.MultiNodeConsolidation + c.SingleNodeConsolidation,
         abandoned: this.stats.abandoned,
+        nodesExpired: this.stats.nodesExpired,
       },
       samples: s,
       nodes: this.nodes.map((n) => ({
@@ -621,5 +678,5 @@
 
   function simulate(config, scenario) { return new Sim(config, scenario).run(); }
 
-  root.KSim = { Sim, simulate, SIZES, desiredReplicas, parseDuration, buildInstanceTypes, CATALOG, STEP };
+  root.KSim = { Sim, simulate, SIZES, desiredReplicas, parseDuration, optionalDuration, buildInstanceTypes, CATALOG, STEP };
 })(typeof window !== 'undefined' ? window : globalThis);

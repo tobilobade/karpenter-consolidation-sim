@@ -75,6 +75,16 @@
           example: 'Budget 0 from 09:00 for 8h means "don\'t move my pods during work hours".',
         },
         {
+          id: 'expireAfter', term: 'expireAfter',
+          body: 'The maximum age of a server. When it gets this old, Karpenter replaces it, even if it\'s busy. This keeps servers fresh. It doesn\'t wait for a budget.',
+          example: '<b>720h</b> (the default) means servers are replaced after 30 days. <b>Never</b> means they can live forever.',
+        },
+        {
+          id: 'tgp', term: 'terminationGracePeriod',
+          body: 'The longest a server may take to shut down. After this time, any pods still on it are removed by force, even do-not-disrupt ones.',
+          example: 'While a server is shutting down, it uses up a slot in your disruption budget. A long grace period can hold that slot for hours.',
+        },
+        {
           id: 'instanceReqs', term: 'Instance family and size',
           body: 'Which server types Karpenter may buy. <b>c5</b> = more CPU, <b>m5</b> = balanced, <b>r5</b> = more memory. <b>large</b> is small (2 CPUs), and each step up doubles it, up to <b>8xlarge</b> (32 CPUs). Karpenter picks the cheapest one that fits.',
         },
@@ -111,6 +121,11 @@
         {
           id: 'doNotDisrupt', term: 'do-not-disrupt',
           body: 'A label on a pod that says "don\'t remove my server". Good for long jobs that can\'t restart. But that server stays, even if it\'s nearly empty.',
+        },
+        {
+          id: 'silentBudget', term: 'Budget used up (silent)',
+          body: 'Servers that are already shutting down, for <b>any</b> reason, use up your budget. If they use all of it, empty servers have to wait. Real Karpenter doesn\'t log anything when this happens. This simulator does.',
+          example: 'Budget 30% of 20 servers = 6. If 6 old servers are still shutting down, 0 are left for empty ones. The fix is to set the Empty budget to 100%.',
         },
         {
           id: 'blocked', term: 'Blocked',

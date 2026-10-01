@@ -99,7 +99,8 @@
       <li><b>Provisioning:</b> pods are bin-packed while any allowed instance type still fits, then the cheapest fitting on-demand type is launched. Nodes take 60s to become Ready.</li>
       <li><b>kube-scheduler</b> places pods on Ready nodes with NodeResourcesFit scoring, either LeastAllocated (the default, which spreads pods) or MostAllocated (which packs them).</li>
       <li><b>Instance types:</b> c5/m5/r5, large to 8xlarge, at approximate us-east-1 on-demand prices. Allocatable subtracts EKS kube-reserved, the eviction threshold, 7.5% VM memory overhead, ENI max-pods and DaemonSet overhead.</li>
-      <li><b>Not modelled:</b> spot and spot-to-spot, drift and expiration, affinity and topology spread, NodePool limits, pod priority, <code>terminationGracePeriod</code>, and multiple NodePools.</li>
+      <li><b>Expiration:</b> nodes older than <code>expireAfter</code> start draining right away, ignoring budgets, with no replacement launched first. Draining respects PDBs and do-not-disrupt until <code>terminationGracePeriod</code>, then the remaining pods are force-deleted. Draining nodes count against every disruption budget.</li>
+      <li><b>Not modelled:</b> spot and spot-to-spot, drift, affinity and topology spread, NodePool limits, pod priority, <code>terminationGracePeriod</code>, and multiple NodePools.</li>
     </ul>
   </section>
 </main>

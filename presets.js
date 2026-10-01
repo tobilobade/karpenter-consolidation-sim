@@ -13,6 +13,8 @@
       families: ALL.slice(),
       sizes: ['large', 'xlarge', '2xlarge'],
       schedulerScoring: 'LeastAllocated',
+      expireAfter: '720h',
+      terminationGracePeriod: '',
     }, overrides);
   }
 
@@ -96,6 +98,28 @@
       },
       a: pool(),
       b: pool(),
+    },
+    {
+      id: 'expiry-budget',
+      name: 'Expiring servers use up the Empty budget',
+      description: 'Servers reach their expireAfter age at hour 4. Six of them run do-not-disrupt jobs, so they stay in "shutting down" until terminationGracePeriod runs out at hour 10. Those six count against the Empty budget. When a batch job finishes at hour 6 and leaves six servers empty, A (Empty budget 30%) has nothing left to spend, so the empty servers stay up, and real Karpenter logs nothing about it. B (Empty budget 100%) removes them straight away. Empty servers run no apps, so 100% is safe.',
+      scenario: {
+        durationHours: 12,
+        daemonset: DS,
+        workloads: [
+          { name: 'web', cpu: 500, mem: 1024, shape: { type: 'steady', replicas: 30 }, pdb: null, doNotDisrupt: false },
+          { name: 'ray-head', cpu: 2000, mem: 4096, shape: { type: 'steady', replicas: 6 }, pdb: null, doNotDisrupt: true },
+          { name: 'batch', cpu: 1700, mem: 2048, shape: { type: 'step', from: 12, to: 0, atHour: 6 }, pdb: null, doNotDisrupt: false },
+        ],
+      },
+      a: pool({
+        consolidationPolicy: 'WhenEmpty', consolidateAfter: '30s', sizes: ['large', 'xlarge'], expireAfter: '4h', terminationGracePeriod: '6h',
+        budgets: [{ nodes: '30%', reasons: ['Empty'], schedule: null }, { nodes: '0', reasons: ['Underutilized'], schedule: null }],
+      }),
+      b: pool({
+        consolidationPolicy: 'WhenEmpty', consolidateAfter: '30s', sizes: ['large', 'xlarge'], expireAfter: '4h', terminationGracePeriod: '6h',
+        budgets: [{ nodes: '100%', reasons: ['Empty'], schedule: null }, { nodes: '0', reasons: ['Underutilized'], schedule: null }],
+      }),
     },
   ];
 })(typeof window !== 'undefined' ? window : globalThis);

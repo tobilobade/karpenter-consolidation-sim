@@ -16,7 +16,7 @@
   const FAMILIES = ['c5', 'm5', 'r5'];
   const LOG_KINDS = [
     ['all', 'All'], ['disrupt', 'Disruptions'], ['provision', 'Provisioning'], ['terminate', 'Terminations'],
-    ['blocked', 'Blocked'], ['budget', 'Budget'], ['abandon', 'Abandoned'],
+    ['expire', 'Expiry'], ['blocked', 'Blocked'], ['budget', 'Budget'], ['abandon', 'Abandoned'],
   ];
   const MAX_LOG_LINES = 1500;
   const POLICY_HINTS = {
@@ -144,6 +144,14 @@
           <span>kube-scheduler scoring ${help('scoring', 'scheduler scoring')}</span>
           <select data-path="${side}.schedulerScoring" aria-label="kube-scheduler scoring">${opt('LeastAllocated', c.schedulerScoring, 'LeastAllocated (default)')}${opt('MostAllocated', c.schedulerScoring)}</select>
         </div>
+        <div class="field">
+          <span>expireAfter ${help('expireAfter', 'expireAfter')} <span class="muted">e.g. 720h, Never</span></span>
+          <input type="text" data-path="${side}.expireAfter" data-validate="duration" value="${esc(c.expireAfter == null ? 'Never' : c.expireAfter)}" aria-label="expireAfter">
+        </div>
+        <div class="field">
+          <span>terminationGracePeriod ${help('tgp', 'terminationGracePeriod')} <span class="muted">blank = not set</span></span>
+          <input type="text" data-path="${side}.terminationGracePeriod" data-validate="optional-duration" value="${esc(c.terminationGracePeriod || '')}" aria-label="terminationGracePeriod">
+        </div>
       </div>
       <div class="fields">
         <div class="field"><span>instance-family ${help('instanceReqs', 'instance family')}</span><span class="checks">${FAMILIES.map((f) => check(side + '.families', f, c.families)).join('')}</span></div>
@@ -184,7 +192,8 @@ spec:
     y += `        - key: karpenter.sh/capacity-type
           operator: In
           values: ["on-demand"]
-  disruption:
+      expireAfter: ${c.expireAfter == null ? 'Never' : c.expireAfter}
+${c.terminationGracePeriod ? `      terminationGracePeriod: ${c.terminationGracePeriod}\n` : ''}  disruption:
     consolidationPolicy: ${c.consolidationPolicy}
     consolidateAfter: ${c.consolidateAfter}
 `;
@@ -219,6 +228,7 @@ spec:
     const v = el.value.trim();
     try {
       if (el.dataset.validate === 'duration') KSim.parseDuration(v);
+      if (el.dataset.validate === 'optional-duration') KSim.optionalDuration(v);
       if (el.dataset.validate === 'budget' && !/^\d+%?$/.test(v)) throw new Error('bad budget');
       el.classList.remove('invalid');
       return true;
@@ -321,6 +331,7 @@ spec:
     ['  Emptiness / multi-node / single-node', (r) => r.summary.commands, (c) => `${c.Emptiness} / ${c.MultiNodeConsolidation} / ${c.SingleNodeConsolidation}`, 'none', 'methods'],
     ['Commands abandoned at validation', (r) => r.summary.abandoned, int, null, 'validation'],
     ['Nodes launched', (r) => r.summary.nodesLaunched, int, null],
+    ['Nodes expired', (r) => r.summary.nodesExpired || 0, int, null, 'expireAfter'],
     ['Pod evictions', (r) => r.summary.evictions, int, 'lower', 'eviction'],
     ['Pod-minutes pending', (r) => r.summary.podPendingMinutes, int, 'lower', 'pendingMinutes'],
   ];

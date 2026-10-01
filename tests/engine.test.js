@@ -147,6 +147,31 @@
     assert(last(b).costHr > last(a).costHr * 1.5, `a ${last(a).costHr} b ${last(b).costHr}`);
   });
 
+  test('expireAfter drains old nodes without respecting budgets', () => {
+    const r = runChecked(pool({ expireAfter: '1h', budgets: [{ nodes: '0' }] }), scen([wl('a', { type: 'steady', replicas: 10 })], 2));
+    assert(r.summary.nodesExpired > 0, 'no nodes expired');
+    assert(r.nodes.some((n) => n.endReason === 'Expired' && n.terminatedAt !== null));
+    assert(last(r).pending === 0);
+  });
+
+  test('terminationGracePeriod force-deletes do-not-disrupt pods', () => {
+    const sc = scen([wl('job', { type: 'steady', replicas: 1 }, { doNotDisrupt: true })], 4);
+    const held = runChecked(pool({ expireAfter: '1h' }), sc);
+    const forced = runChecked(pool({ expireAfter: '1h', terminationGracePeriod: '30m' }), sc);
+    const n1 = held.nodes.find((n) => n.id === 1), n2 = forced.nodes.find((n) => n.id === 1);
+    assert(n1.terminatedAt === null, 'without TGP the node should drain forever');
+    assert(n2.terminatedAt !== null && n2.terminatedAt >= 3600 + 1800, 'with TGP the node ends after the grace period');
+  });
+
+  test('expiry preset: in-flight deletions starve the Empty budget', () => {
+    const p = KSimPresets.find((x) => x.id === 'expiry-budget');
+    const a = simulate(Object.assign({ side: 'a' }, p.a), p.scenario);
+    const b = simulate(Object.assign({ side: 'b' }, p.b), p.scenario);
+    assert(a.log.some((l) => l.kind === 'budget' && /already being deleted/.test(l.msg)), 'A should log the silent budget block');
+    assert(b.summary.commands.Emptiness > a.summary.commands.Emptiness);
+    assert(b.summary.totalCost < a.summary.totalCost);
+  });
+
   test('deterministic', () => {
     const p = KSimPresets[0];
     const a = simulate(p.b, p.scenario), b = simulate(p.b, p.scenario);
