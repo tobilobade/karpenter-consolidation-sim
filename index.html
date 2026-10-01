@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Karpenter Consolidation Simulator</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Karpenter Consolidation Simulator</h1>
+      <p class="sub">See how two NodePool disruption settings behave on the same workload over time. Models Karpenter v1, simplified (see <a href="#assumptions">assumptions</a>).</p>
+    </div>
+    <div class="row">
+      <button id="copy-link" type="button">Copy share link</button>
+    </div>
+  </header>
+
+  <section class="card">
+    <div class="row">
+      <label class="field" style="flex:1">Scenario
+        <select id="preset"></select>
+      </label>
+      <label class="field">Duration
+        <select id="duration" data-path="scenario.durationHours" data-type="number">
+          <option value="4">4h</option><option value="6">6h</option><option value="12">12h</option>
+          <option value="24">24h</option><option value="48">48h</option>
+        </select>
+      </label>
+    </div>
+    <p id="preset-desc" class="sub"></p>
+  </section>
+
+  <section class="card">
+    <h2>Workloads <span class="muted" style="font-weight:400">(shared by A and B unless "Runs in" says otherwise)</span></h2>
+    <div class="table-scroll"><table class="wl-table" id="workloads"></table></div>
+    <div class="row" style="margin-top:10px">
+      <button type="button" id="add-workload">+ Add workload</button>
+      <span class="muted">DaemonSet overhead per node:</span>
+      <label class="shape-params">CPU <input type="number" data-path="scenario.daemonset.cpu" data-type="number" class="narrow">m</label>
+      <label class="shape-params">Mem <input type="number" data-path="scenario.daemonset.mem" data-type="number" class="narrow">Mi</label>
+      <label class="shape-params">Pods <input type="number" data-path="scenario.daemonset.pods" data-type="number" class="narrow"></label>
+    </div>
+  </section>
+
+  <div class="grid2">
+    <section class="card config" id="config-a"></section>
+    <section class="card config" id="config-b"></section>
+  </div>
+
+  <section class="card" id="error"></section>
+
+  <section class="card">
+    <h2>Results</h2>
+    <p id="verdict"></p>
+    <table id="summary"></table>
+  </section>
+
+  <section class="card">
+    <p class="muted" style="margin-top:0">Hover any chart to sync the crosshair. Click to pin it; click a log line to jump to its time.</p>
+    <div class="charts">
+      <div id="chart-cost"></div>
+      <div id="chart-nodes"></div>
+      <div id="chart-util"></div>
+      <div id="chart-pending"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Node timeline</h2>
+    <p class="muted">One row per node. The lighter segment is launch time before the node is Ready. Hover a row for details.</p>
+    <div class="grid2">
+      <div id="timeline-a"></div>
+      <div id="timeline-b"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Decision log</h2>
+    <div class="filters" id="filters"></div>
+    <div class="grid2">
+      <div><h3><span class="key a"></span>A</h3><div class="log" id="log-a"></div></div>
+      <div><h3><span class="key b"></span>B</h3><div class="log" id="log-b"></div></div>
+    </div>
+  </section>
+
+  <section class="card" id="assumptions">
+    <h2>How the model works</h2>
+    <p class="sub">The simulation advances in 10s ticks. The rules follow Karpenter v1. Where the real controller is more complex, the model is simpler, so use it to build intuition, not to predict exact numbers.</p>
+    <ul class="assumptions">
+      <li><b>Requests, not usage.</b> Consolidation packs by pod resource requests. Actual CPU usage is never considered, just like the real controller.</li>
+      <li><b>Order of methods:</b> Emptiness, then multi-node consolidation (binary search over up to 100 candidates, replacing them with at most one cheaper node), then single-node (delete, or replace with a cheaper node). One command is computed at a time, re-validated after 15s, then executed.</li>
+      <li><b>Candidates</b> must be Ready and have had no pod added or removed for <code>consolidateAfter</code>. Nodes are excluded if they run a <code>karpenter.sh/do-not-disrupt</code> pod or a pod whose PDB currently allows 0 disruptions.</li>
+      <li><b>Budgets:</b> the most restrictive active budget for the reason wins. Percentages are rounded up against the NodePool's node count, and nodes already disrupting count against the budget. Schedules are daily windows, like <code>0 9 * * *</code> with a duration. If no budget matches a reason, it's unlimited.</li>
+      <li><b>Replacements</b> are launched first. Candidates are tainted immediately and drained once the replacement is Ready. Evictions respect PDBs, and evicted pods are recreated by their controller.</li>
+      <li><b>Provisioning:</b> pods are bin-packed while any allowed instance type still fits, then the cheapest fitting on-demand type is launched. Nodes take 60s to become Ready.</li>
+      <li><b>kube-scheduler</b> places pods on Ready nodes with NodeResourcesFit scoring, either LeastAllocated (the default, which spreads pods) or MostAllocated (which packs them).</li>
+      <li><b>Instance types:</b> c5/m5/r5, large to 8xlarge, at approximate us-east-1 on-demand prices. Allocatable subtracts EKS kube-reserved, the eviction threshold, 7.5% VM memory overhead, ENI max-pods and DaemonSet overhead.</li>
+      <li><b>Not modelled:</b> spot and spot-to-spot, drift and expiration, affinity and topology spread, NodePool limits, pod priority, <code>terminationGracePeriod</code>, and multiple NodePools.</li>
+    </ul>
+  </section>
+</main>
+<script src="engine.js"></script>
+<script src="presets.js"></script>
+<script src="charts.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
