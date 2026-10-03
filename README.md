@@ -2,7 +2,9 @@
 
 See how Karpenter v1 consolidation settings behave over time. Pick a scenario, tweak two NodePool configs (A vs B), and compare cost, node count, evictions and the decision log side by side.
 
-**Run it:** open `index.html` in a browser. No build step or dependencies; it can be hosted as static files (e.g. GitHub Pages). The "Copy share link" button encodes the full setup in the URL.
+**Live:** https://tobilobade.github.io/karpenter-consolidation-sim/
+
+**Run it locally:** open `index.html` in a browser. No build step or dependencies; it can be hosted as static files (e.g. GitHub Pages). The "Copy share link" button encodes the full setup in the URL.
 
 ## What you can change
 
@@ -47,3 +49,5 @@ It's for building intuition, not predicting exact numbers. Validate important sc
 - `charts.js`: SVG line charts + node timeline
 - `app.js`: UI and state
 - `index.html`, `styles.css`
+
+Sister project: [Pod Address Simulator](https://github.com/tobilobade/vpc-cni-ip-simulator) ([live](https://tobilobade.github.io/vpc-cni-ip-simulator/)) shows how the EKS VPC CNI hands out subnet IPs to pods.
